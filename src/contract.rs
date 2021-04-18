@@ -2,9 +2,13 @@ use cosmwasm_std::{
     to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, Querier, StdError,
     StdResult, Storage,
 };
-
+use cosmwasm_storage::{PrefixedStorage};
+//cosmwasm_std::PrefixedStorage::multilevel;
+//use schemars::_serde_json::value;
 use crate::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg};
-use crate::state::{config, config_read, State};
+use crate::state::{load, /*may_load, remove,*/ save, UserInfo, config, config_read, State};
+
+pub const PREFIX_INFOS: &[u8] = b"infos";
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -29,6 +33,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     match msg {
         HandleMsg::Increment {} => try_increment(deps, env),
         HandleMsg::Reset { count } => try_reset(deps, env, count),
+        HandleMsg::Register { s_key, validity } => try_register(deps, env, s_key, validity),
     }
 }
 
@@ -60,18 +65,51 @@ pub fn try_reset<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse::default())
 }
 
+pub fn try_register<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    s_key: String,
+    validity: bool,
+) -> StdResult<HandleResponse> {
+    let info = UserInfo {
+        secret_key: s_key,
+        is_valid: validity,
+    };
+    let message_sender = deps.api.canonical_address(&env.message.sender)?;
+    let mut info_store = PrefixedStorage::new(PREFIX_INFOS, &mut deps.storage);
+    save(&mut info_store, message_sender.as_slice(), &info)?;
+
+
+    /*let sender_address_raw = deps.api.canonical_address(&env.message.sender)?;
+    config(&mut deps.storage).update(|mut state| {
+        if sender_address_raw != state.owner {
+            return Err(StdError::Unauthorized { backtrace: None });
+        }
+        state.count = count;
+        Ok(state)
+    })?;*/
+    Ok(HandleResponse::default())
+}
+
 pub fn query<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        QueryMsg::Search { s_key } => to_binary(&search_result(deps)?),
     }
 }
 
 fn query_count<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> StdResult<CountResponse> {
     let state = config_read(&deps.storage).load()?;
     Ok(CountResponse { count: state.count })
+}
+
+fn search_result<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> StdResult<CountResponse> {
+    /*let state = config_read(&deps.storage).load()?;
+    Ok(CountResponse { count: state.count })*/
+    
 }
 
 #[cfg(test)]
