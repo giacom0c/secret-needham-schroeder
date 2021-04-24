@@ -1,26 +1,30 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, Querier, StdError,
-    StdResult, Storage,
+    log, to_binary, Api, CanonicalAddr, Env, Extern, HandleResponse, HandleResult, HumanAddr,
+    InitResponse, InitResult, Querier, QueryResult, StdError, Storage
 };
-use cosmwasm_storage::{PrefixedStorage};
-//cosmwasm_std::PrefixedStorage::multilevel;
+use std::collections::HashSet;
+//use cosmwasm_storage::{PrefixedStorage};
 //use schemars::_serde_json::value;
-use crate::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg};
-use crate::state::{load, /*may_load, remove,*/ save, UserInfo, config, config_read, State};
+use crate::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg, QueryAnswer};
+use crate::state::{load, /*may_load, remove,*/ save, UserInfo, State};
+use secret_toolkit::utils::{pad_handle_result, pad_query_result, HandleCallback, Query};
 
-pub const PREFIX_INFOS: &[u8] = b"infos";
+//pub const PREFIX_INFOS: &[u8] = b"infos";
+pub const BLOCK_SIZE: usize = 256;
+pub const CONFIG_KEY: &[u8] = b"config";
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     msg: InitMsg,
-) -> StdResult<InitResponse> {
+) -> InitResult {
     let state = State {
         count: msg.count,
         owner: deps.api.canonical_address(&env.message.sender)?,
+        users: HashSet::new()
     };
 
-    config(&mut deps.storage).save(&state)?;
+    save(&mut deps.storage, CONFIG_KEY, &state)?;
 
     Ok(InitResponse::default())
 }
@@ -29,87 +33,64 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+) -> HandleResult {
     match msg {
         HandleMsg::Increment {} => try_increment(deps, env),
-        HandleMsg::Reset { count } => try_reset(deps, env, count),
-        HandleMsg::Register { s_key, validity } => try_register(deps, env, s_key, validity),
+        HandleMsg::Register { s_key } => try_register(deps, env, s_key),
     }
 }
 
 pub fn try_increment<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     _env: Env,
-) -> StdResult<HandleResponse> {
-    config(&mut deps.storage).update(|mut state| {
-        state.count += 1;
-        Ok(state)
-    })?;
+) -> HandleResult {
+    let mut state: State = load(&deps.storage, CONFIG_KEY)?;
+    state.count += 3;
+    save(&mut deps.storage, CONFIG_KEY, &state)?;
 
-    Ok(HandleResponse::default())
-}
-
-pub fn try_reset<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    count: i32,
-) -> StdResult<HandleResponse> {
-    let sender_address_raw = deps.api.canonical_address(&env.message.sender)?;
-    config(&mut deps.storage).update(|mut state| {
-        if sender_address_raw != state.owner {
-            return Err(StdError::Unauthorized { backtrace: None });
-        }
-        state.count = count;
-        Ok(state)
-    })?;
     Ok(HandleResponse::default())
 }
 
 pub fn try_register<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    s_key: String,
-    validity: bool,
-) -> StdResult<HandleResponse> {
+    s_key: String
+) -> HandleResult {
+    let mut state: State = load(&deps.storage, CONFIG_KEY)?;
+    let message_sender = deps.api.canonical_address(&env.message.sender)?;
+    state.users.insert(message_sender.as_slice().to_vec());
+    save(&mut deps.storage, CONFIG_KEY, &state)?;
+    //let mut info_store = PrefixedStorage::new(PREFIX_INFOS, &mut deps.storage);
     let info = UserInfo {
         secret_key: s_key,
-        is_valid: validity,
+        is_valid: true,
     };
-    let message_sender = deps.api.canonical_address(&env.message.sender)?;
-    let mut info_store = PrefixedStorage::new(PREFIX_INFOS, &mut deps.storage);
-    save(&mut info_store, message_sender.as_slice(), &info)?;
+    save(&mut deps.storage, message_sender.as_slice(), &info)?;
 
-
-    /*let sender_address_raw = deps.api.canonical_address(&env.message.sender)?;
-    config(&mut deps.storage).update(|mut state| {
-        if sender_address_raw != state.owner {
-            return Err(StdError::Unauthorized { backtrace: None });
-        }
-        state.count = count;
-        Ok(state)
-    })?;*/
     Ok(HandleResponse::default())
 }
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
-        QueryMsg::Search { s_key } => to_binary(&search_result(deps)?),
-    }
+pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
+    let response = match msg {
+        QueryMsg::GetCount {} => query_count(deps),
+        QueryMsg::Search { s_key} => search_result(deps)
+    };
+    pad_query_result(response, BLOCK_SIZE)
 }
 
-fn query_count<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> StdResult<CountResponse> {
-    let state = config_read(&deps.storage).load()?;
-    Ok(CountResponse { count: state.count })
+fn query_count<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> QueryResult {
+    let state: State = load(&deps.storage, CONFIG_KEY)?;
+    to_binary(&QueryAnswer::GetCount {
+        count: state.count
+    })
+    //Ok(CountResponse { count: state.count })
 }
 
-fn search_result<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> StdResult<CountResponse> {
-    /*let state = config_read(&deps.storage).load()?;
-    Ok(CountResponse { count: state.count })*/
-    
+fn search_result<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> QueryResult {
+    let state: State = load(&deps.storage, CONFIG_KEY)?;
+    to_binary(&QueryAnswer::GetCount {
+        count: state.count
+    })
 }
 
 #[cfg(test)]
@@ -152,33 +133,5 @@ mod tests {
         let res = query(&deps, QueryMsg::GetCount {}).unwrap();
         let value: CountResponse = from_binary(&res).unwrap();
         assert_eq!(18, value.count);
-    }
-
-    #[test]
-    fn reset() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-
-        let msg = InitMsg { count: 17 };
-        let env = mock_env("creator", &coins(2, "token"));
-        let _res = init(&mut deps, env, msg).unwrap();
-
-        // not anyone can reset
-        let unauth_env = mock_env("anyone", &coins(2, "token"));
-        let msg = HandleMsg::Reset { count: 5 };
-        let res = handle(&mut deps, unauth_env, msg);
-        match res {
-            Err(StdError::Unauthorized { .. }) => {}
-            _ => panic!("Must return unauthorized error"),
-        }
-
-        // only the original creator can reset the counter
-        let auth_env = mock_env("creator", &coins(2, "token"));
-        let msg = HandleMsg::Reset { count: 5 };
-        let _res = handle(&mut deps, auth_env, msg).unwrap();
-
-        // should now be 5
-        let res = query(&deps, QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(5, value.count);
     }
 }

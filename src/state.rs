@@ -1,16 +1,14 @@
 use schemars::JsonSchema;
-use std::{any::type_name, /*collections::HashSet*/};
+use std::{any::type_name, collections::HashSet};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use cosmwasm_std::{CanonicalAddr, /*HumanAddr,*/ ReadonlyStorage, StdError, StdResult, Storage};
-use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
 use secret_toolkit::serialization::{Bincode2, Serde};
-
-pub static CONFIG_KEY: &[u8] = b"config";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
     pub count: i32,
     pub owner: CanonicalAddr,
+    pub users: HashSet<Vec<u8>>,
 }
 
 /// Struct that contains users' details
@@ -23,14 +21,6 @@ pub struct State {
 pub struct UserInfo {
     pub secret_key: String,
     pub is_valid: bool,
-}
-
-pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, State> {
-    singleton(storage, CONFIG_KEY)
-}
-
-pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, State> {
-    singleton_read(storage, CONFIG_KEY)
 }
 
 /// Returns StdResult<()> resulting from saving an item to storage

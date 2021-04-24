@@ -13,3 +13,6 @@
 # IDEs
 *.iml
 .idea
+
+# Compiled outputs
+*.wasm.gz

@@ -11,8 +11,7 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     Increment {},
-    Reset { count: i32 },
-    Register { s_key: String, validity: bool }
+    Register { s_key: String }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -32,4 +31,13 @@ pub struct CountResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct SearchResponse {
     pub found: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryAnswer {
+    /// AuctionInfo query response
+    GetCount {
+        count: i32
+    },
 }
