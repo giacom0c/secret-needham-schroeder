@@ -17,7 +17,7 @@ pub struct State {
 ///
 /// * `secret_key` - user's key, used to encrypt/decrypt data
 /// * `is_valid` - check if the instance is valid or revoked
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct UserInfo {
     pub secret_key: String,
     pub is_valid: bool,

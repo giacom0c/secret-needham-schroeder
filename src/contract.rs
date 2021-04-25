@@ -5,7 +5,7 @@ use cosmwasm_std::{
 use std::collections::HashSet;
 //use cosmwasm_storage::{PrefixedStorage};
 //use schemars::_serde_json::value;
-use crate::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg, QueryAnswer};
+use crate::{msg::{CountResponse, HandleMsg, InitMsg, QueryMsg, QueryAnswer}, state::may_load};
 use crate::state::{load, /*may_load, remove,*/ save, UserInfo, State};
 use secret_toolkit::utils::{pad_handle_result, pad_query_result, HandleCallback, Query};
 
@@ -56,8 +56,11 @@ pub fn try_register<S: Storage, A: Api, Q: Querier>(
     env: Env,
     s_key: String
 ) -> HandleResult {
+    //load current state
     let mut state: State = load(&deps.storage, CONFIG_KEY)?;
+    //get the function caller
     let message_sender = deps.api.canonical_address(&env.message.sender)?;
+    //add him to users list
     state.users.insert(message_sender.as_slice().to_vec());
     save(&mut deps.storage, CONFIG_KEY, &state)?;
     //let mut info_store = PrefixedStorage::new(PREFIX_INFOS, &mut deps.storage);
@@ -65,6 +68,7 @@ pub fn try_register<S: Storage, A: Api, Q: Querier>(
         secret_key: s_key,
         is_valid: true,
     };
+    //add his information using his address as hashset key
     save(&mut deps.storage, message_sender.as_slice(), &info)?;
 
     Ok(HandleResponse::default())
@@ -73,7 +77,7 @@ pub fn try_register<S: Storage, A: Api, Q: Querier>(
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
         QueryMsg::GetCount {} => query_count(deps),
-        QueryMsg::Search { s_key} => search_result(deps)
+        QueryMsg::Search { address, } => search_result(deps, &address)
     };
     pad_query_result(response, BLOCK_SIZE)
 }
@@ -86,11 +90,34 @@ fn query_count<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> QueryR
     //Ok(CountResponse { count: state.count })
 }
 
-fn search_result<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> QueryResult {
+fn search_result<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, address: &HumanAddr) -> QueryResult {
     let state: State = load(&deps.storage, CONFIG_KEY)?;
-    to_binary(&QueryAnswer::GetCount {
-        count: state.count
-    })
+    //user i'm looking for, passing in the query json
+    let the_user = deps.api.canonical_address(address)?;
+    //bogus data to build an output
+    let fakeinfo = UserInfo {
+        secret_key: "missing!".to_string(),
+        is_valid: false
+    };
+    //check if that user exists, if yes i try to load his informations and return them, else i return bogus data above
+    if state.users.contains(&the_user.as_slice().to_vec()) {
+        let info: Option<UserInfo> = may_load(&deps.storage, the_user.as_slice())?;
+        if let Some(found_info) = info {
+            to_binary(&QueryAnswer::Search {
+                contact: found_info            
+            })
+        }
+        else {
+            to_binary(&QueryAnswer::Search {
+                contact: fakeinfo
+            })
+        }        
+    }
+    else {
+        to_binary(&QueryAnswer::Search {
+            contact: fakeinfo
+        })
+    }    
 }
 
 #[cfg(test)]
